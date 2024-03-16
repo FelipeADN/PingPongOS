@@ -31,7 +31,7 @@ void queue_print(char *name, queue_t *queue, void print_elem (void*)){
             print_elem(aux); //imprime ultimo
         }
     }
-    printf("]\n", name);
+    printf("]\n");
 }
 
 int queue_append(queue_t **queue, queue_t *elem){
@@ -58,6 +58,7 @@ int queue_append(queue_t **queue, queue_t *elem){
         (*queue)->prev->next = elem;
         (*queue)->prev = elem;
     }
+    return 0;
 }
 
 int queue_remove (queue_t **queue, queue_t *elem){
@@ -92,12 +93,12 @@ int queue_remove (queue_t **queue, queue_t *elem){
         elem->prev = NULL;
     }
     else{ 
-        if(*queue == elem){ //eliminando o primeiro
+        if(*queue == elem) //eliminando o primeiro
             *queue = elem->next;
-        }
         elem->prev->next = elem->next;
         elem->next->prev = elem->prev;
         elem->next = NULL;
         elem->prev = NULL;
     }
+    return 0;
 }
