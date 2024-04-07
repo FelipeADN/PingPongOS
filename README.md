@@ -1,2 +1,2 @@
 # PingPongOS
- Sistema Operacional realizado com a matéria da UFPR
+    SO realizado em conjunto com a matéria de Sistemas Operacionais da UFPR
