@@ -18,6 +18,11 @@ typedef struct task_t
   short status ;			// pronta, rodando, suspensa, ...
   short priority; //prioridade da tarefa
   short priorityOriginal; //prioridade inicial da tarefa
+  int quantum; //quantum atual da tarefa
+  char sistemTask; //1 pertence ao sistema, 0 nao
+  int startTime; //timestamp do inicio da tarefa
+  int processorTime; //soma do tempo de execucao
+  int activations; //quantidade de ativacoes
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
