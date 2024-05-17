@@ -12,17 +12,20 @@
 // Estrutura que define um Task Control Block (TCB)
 typedef struct task_t
 {
-  struct task_t *prev, *next ;		// ponteiros para usar em filas
-  int id ;				// identificador da tarefa
-  ucontext_t context ;			// contexto armazenado da tarefa
-  short status ;			// pronta, rodando, suspensa, ...
-  short priority; //prioridade da tarefa
-  short priorityOriginal; //prioridade inicial da tarefa
-  int quantum; //quantum atual da tarefa
-  char sistemTask; //1 pertence ao sistema, 0 nao
-  int startTime; //timestamp do inicio da tarefa
-  int processorTime; //soma do tempo de execucao
-  int activations; //quantidade de ativacoes
+  struct task_t *prev, *next ;  // ponteiros para usar em filas
+  int id ;				              // identificador da tarefa
+  ucontext_t context ;			    // contexto armazenado da tarefa
+  short status ;			          // pronta, rodando, suspensa, ...
+  short priority;               //prioridade da tarefa
+  short priorityOriginal;       //prioridade inicial da tarefa
+  int quantum;                  //quantum atual da tarefa
+  char sistemTask;              //1 pertence ao sistema, 0 nao
+  int startTime;                //timestamp do inicio da tarefa
+  int processorTime;            //soma do tempo de execucao
+  int activations;              //quantidade de ativacoes
+  int childId;                  //id da tarefa que deve terminar antesd e voltar
+  int childReturn;              //exit_code da tarefa filho
+  int wakeupTime;               //quando que deve acordar
   // ... (outros campos serão adicionados mais tarde)
 } task_t ;
 
