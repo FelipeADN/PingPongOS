@@ -32,7 +32,10 @@ typedef struct task_t
 // estrutura que define um semáforo
 typedef struct
 {
-  // preencher quando necessário
+  int counter; //contador
+  task_t *queue; //fila de tarefas suspensas
+  short destroyed; //se foi destruido
+  int lock; //lock para test-and-set
 } semaphore_t ;
 
 // estrutura que define um mutex
@@ -49,8 +52,16 @@ typedef struct
 
 // estrutura que define uma fila de mensagens
 typedef struct
-{
-  // preencher quando necessário
+{ 
+  void *queueBuffer; //buffer da fila
+  int capacity; //tamanho maximo da fila
+  short size; //tamanho por mensagem
+  int amtMessage; //quantidade de mensagens
+  short destroyed; //se foi destruido
+
+  semaphore_t semaphorBuffer; //semaforo para o buffer
+  semaphore_t semaphorProducer; //semaforo para o produtor
+  semaphore_t semaphorConsumer; //semaforo para o consumidor
 } mqueue_t ;
 
 #endif

@@ -3,6 +3,7 @@
 #include <ucontext.h>
 #include <signal.h>
 #include <sys/time.h>
+#include <string.h>
 #include "ppos.h"
 #include "queue.h"
 
@@ -46,7 +47,7 @@ struct sigaction action ;
 struct itimerval timer;
 
 task_t mainTask, dispatcherTask, *currentTask;
-task_t *ready, *suspended, *sleeping;
+task_t *ready, *suspended, *sleeping; //filas
 int lastId = 0;
 int amtReady = 0;
 char sistemFunction = 0;
@@ -62,6 +63,15 @@ int task_wait(task_t *task);
 void task_suspend(task_t **queue);
 void task_awake(task_t * task, task_t **queue);
 void task_sleep(int t);
+int sem_init (semaphore_t *s, int value);
+int sem_down (semaphore_t *s);
+int sem_up (semaphore_t *s);
+int sem_destroy (semaphore_t *s);
+int mqueue_init (mqueue_t *queue, int max_msgs, int msg_size);
+int mqueue_send (mqueue_t *queue, void *msg);
+int mqueue_recv (mqueue_t *queue, void *msg);
+int mqueue_destroy (mqueue_t *queue);
+int mqueue_msgs (mqueue_t *queue);
 
 void ppos_init(){
     sistemFunction = 1;
@@ -409,10 +419,11 @@ void task_suspend(task_t **queue){
 void task_awake(task_t * task, task_t **queue){
     sistemFunction = 1;
     //testa se fila/elemento existe e esta na fila
-    if (queue_remove((queue_t **) &queue, (queue_t *) task) < 0)
+    if (queue_remove((queue_t **) queue, (queue_t *) task) < 0)
         exit(8);
     task->status = READY;
     queue_append((queue_t **) &ready, (queue_t *) task);
+    amtReady++;
     sistemFunction = 0;
 }
 
@@ -422,4 +433,206 @@ void task_sleep(int t){
     currentTask->wakeupTime = time + t;
     task_suspend(&sleeping);
     sistemFunction = 0;
+}
+
+int sem_init (semaphore_t *s, int value){
+    sistemFunction = 1;
+    if (s == NULL || s->destroyed == 1){ //se nao existe ou foi destruido
+        sistemFunction = 0;
+        return -1;
+    }
+    s->counter = value;
+    s->queue = NULL; //fila vazia
+    s->destroyed = 0;
+    s->lock = 0;
+    sistemFunction = 0;
+    return 0;
+}
+
+int sem_down (semaphore_t *s){
+    sistemFunction = 1;
+    if (s == NULL){ //se nao existe ou foi destruido
+        sistemFunction = 0;
+        return -1;
+    }
+    if ( s->destroyed == 1){
+        sistemFunction = 0;
+        return -1;
+    }
+    while (__sync_fetch_and_or (&s->lock, 1)); //test-and-set
+    s->counter--; //decrementa contador
+    s->lock = 0 ; //libera o lock
+    if (s->counter < 0) //deve ser suspenso
+        task_suspend((task_t **) &(s->queue)); //suspende a tarefa atual e coloca na fila do semaforo
+    if(s->destroyed == 1){ //semaforo foi destruido enquanto tarefa estava suspensa
+        sistemFunction = 0;
+        return -1;
+    }
+    sistemFunction = 0;
+    return 0;
+}
+
+int sem_up (semaphore_t *s){
+    sistemFunction = 1;
+    if (s == NULL || s->destroyed == 1){ //se nao existe ou foi destruido
+        sistemFunction = 0;
+        return -1;
+    }
+    while (__sync_fetch_and_or (&s->lock, 1)); //test-and-set
+    s->counter++; //incrementa contador
+    s->lock = 0 ; //libera o lock
+    if (s->counter <= 0) //existem tarefas suspensas
+        task_awake((task_t *) s->queue, (task_t **) &(s->queue)); //remove da fila do semaforo e volta pra ready
+    sistemFunction = 0;
+    return 0;
+}
+
+int sem_destroy (semaphore_t *s){
+    sistemFunction = 1;
+    if (s == NULL || s->destroyed == 1){ //se nao existe ou foi destruido
+        sistemFunction = 0;
+        return -1;
+    }
+
+    s->destroyed = 1;
+    int amtSuspended = queue_size((queue_t *) s->queue);
+    for(int i = 0; i < amtSuspended; i++)
+        task_awake((task_t *) s->queue, (task_t **) &(s->queue)); //remove da fila do semaforo e volta pra ready
+    sistemFunction = 0;
+    return 0;
+}
+
+int mqueue_init (mqueue_t *queue, int max_msgs, int msg_size){
+    sistemFunction = 1;
+    if(queue == NULL || max_msgs <= 0 || msg_size <= 0){ //se a fila nao existe ou tamanho eh invalido
+        sistemFunction = 0;
+        return -1;
+    }
+    if ((queue->queueBuffer = malloc(max_msgs * msg_size)) == NULL){ //cria buffer e testa malloc
+        sistemFunction = 0;
+        return -1;
+    }
+
+    // cria e testa semaforos
+    int test = sem_init(&(queue->semaphorBuffer), 1); //cria semaforo para o buffer
+    test = sem_init(&(queue->semaphorProducer), max_msgs); //cria semaforo para o produtor
+    test = sem_init(&(queue->semaphorConsumer), 0); //cria semaforo para o consumidor
+    if (test == -1){ //se algum semaforo nao foi criado
+        sistemFunction = 0;
+        return -1;
+    }
+
+    queue->destroyed = 0;
+    queue->amtMessage = 0;
+    queue->capacity = max_msgs;
+    queue->size = msg_size;
+
+    sistemFunction = 0;
+    return 0;
+}
+
+int mqueue_send (mqueue_t *queue, void *msg){
+    sistemFunction = 1;
+    if (queue == NULL || queue->destroyed == 1){ //se a fila nao existe ou mensagem eh invalida
+        sistemFunction = 0;
+        return -1;
+    }
+
+    //semaforos
+    int test = sem_down(&(queue->semaphorProducer)); //decrementa o semaforo do produtor (limita se cheia)
+    test = sem_down(&(queue->semaphorBuffer)); //decrementa o semaforo do buffer
+    if (test == -1){ //se nao conseguiu decrementar
+        sistemFunction = 0;
+        return -1;
+    }
+
+    //copia mensagem para o buffer
+    memcpy(queue->queueBuffer + (queue->amtMessage * queue->size), msg, queue->size);
+    queue->amtMessage++; //incrementa quantidade de mensagens
+
+    test = sem_up(&(queue->semaphorBuffer)); //incrementa o semaforo do buffer
+    test = sem_up(&(queue->semaphorConsumer)); //incrementa o semaforo do consumidor
+    if (test == -1){ //se nao conseguiu incrementar
+        sistemFunction = 0;
+        return -1;
+    }
+
+    sistemFunction = 0;
+    return 0;
+}
+
+int mqueue_recv (mqueue_t *queue, void *msg){
+    sistemFunction = 1;
+    if (queue == NULL || queue->destroyed == 1){ //se a fila nao existe ou mensagem eh invalida
+        sistemFunction = 0;
+        return -1;
+    }
+
+    //semaforos
+    int test = sem_down(&(queue->semaphorConsumer)); //decrementa o semaforo do consumidor (limita se vazio)
+    test = sem_down(&(queue->semaphorBuffer)); //decrementa o semaforo do buffer
+    if (test == -1){ //se nao conseguiu decrementar
+        sistemFunction = 0;
+        return -1;
+    }
+
+    //copia mensagem do buffer
+    memcpy(msg, queue->queueBuffer, queue->size);
+    queue->amtMessage--; //decrementa quantidade de mensagens
+    //move as mensagens para frente
+    for (int i = 0; i < queue->amtMessage; i++)
+        memcpy(queue->queueBuffer + (i * queue->size), queue->queueBuffer + ((i + 1) * queue->size), queue->size);
+
+    test = sem_up(&(queue->semaphorBuffer)); //incrementa o semaforo do buffer
+    test = sem_up(&(queue->semaphorProducer)); //incrementa o semaforo do produtor
+    if (test == -1){ //se nao conseguiu incrementar
+        sistemFunction = 0;
+        return -1;
+    }
+
+    sistemFunction = 0;
+    return 0;
+}
+
+int mqueue_destroy (mqueue_t *queue){
+    sistemFunction = 1;
+
+    if(queue == NULL || queue->destroyed == 1){ //se a fila nao existe
+        sistemFunction = 0;
+        return -1;
+    }
+
+    //esvazia e libera buffer
+    memset(queue->queueBuffer, 0, queue->size * queue->capacity);
+    free(queue->queueBuffer);
+    queue->destroyed = 1;
+    queue->amtMessage = 0;
+    queue->capacity = 0;
+    queue->size = 0;
+    
+    //destruir semaforos, retornando tarefas com -1
+    int test = sem_destroy(&(queue->semaphorBuffer)); //destruir semaforo do buffer
+    test = sem_destroy(&(queue->semaphorProducer)); //destruir semaforo do produtor
+    test = sem_destroy(&(queue->semaphorConsumer)); //destruir semaforo do consumidor
+    if (test == -1){ //se nao conseguiu destruir
+        sistemFunction = 0;
+        return -1;
+    }
+
+    sistemFunction = 0;
+    return 0;
+}
+
+int mqueue_msgs (mqueue_t *queue){
+    sistemFunction = 1;
+
+    if(queue == NULL || queue->destroyed == 1){ //se a fila nao existe
+        sistemFunction = 0;
+        return -1;
+    }
+
+    return queue->amtMessage;
+
+    sistemFunction = 0;
+    return 0;
 }
